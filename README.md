@@ -31,7 +31,7 @@ Requires Docker (and Docker Compose, bundled with modern Docker Desktop /
 you're in the repo root. Run `make help` at any point for the full target
 list.
 
-**1. Place PDFs locally**
+#### 1. Place PDFs locally
 
 Download the PDFs from the shared folder anywhere on your machine. The
 default is `data/raw_pdfs/`, but this is not a hardcoded requirement — see
@@ -42,13 +42,13 @@ mkdir -p data/raw_pdfs
 cp /path/to/downloaded/*.pdf data/raw_pdfs/
 ```
 
-**2. Build the image**
+#### 2. Build the image
 
 ```bash
 make build
 ```
 
-**3. Run ingestion**
+#### 3. Run ingestion
 
 ```bash
 make ingest
@@ -66,20 +66,20 @@ directly — no need to copy files into the repo first:
 make ingest PDF_DIR=/Users/you/Downloads/datapolitics_pdfs
 ```
 
-**4. Verify the index was created**
+#### 4. Verify the index was created
 
 ```bash
 ls data/index
 # index.faiss  metadata.json
 ```
 
-**5. Start the API server**
+#### 5. Start the API server
 
 ```bash
 make up
 ```
 
-**6. Call `/search`**
+#### 6. Call `/search`
 
 ```bash
 curl -s -X POST http://localhost:8000/search \
@@ -89,7 +89,7 @@ curl -s -X POST http://localhost:8000/search \
 
 Or open `http://localhost:8000/docs` for interactive Swagger UI.
 
-**7. Rebuild the index if the PDF folder changes**
+#### 7. Rebuild the index if the PDF folder changes
 
 Ingestion always does a full rebuild from whatever `PDF_DIR` currently
 contains — add/remove/replace files there and re-run step 3:
@@ -294,8 +294,9 @@ so the suite runs in a few seconds without downloading any weights.
   exact-match fallback.
 - Every ingestion run does a full rebuild of the index; there's no
   incremental update, document diffing, or delete-by-filename.
-- No auth, rate limiting, or request logging on the API — it's built for
-  local evaluation, not for being exposed anywhere.
+- No auth, rate limiting, or structured application logging on the API
+  (uvicorn's default access log is the only thing recording requests) —
+  it's built for local evaluation, not for being exposed anywhere.
 
 ### Situations where search quality may be poor
 
@@ -352,21 +353,25 @@ so the suite runs in a few seconds without downloading any weights.
   exact-match weakness noted above.
 - **Incremental ingestion**: hash each PDF's content and skip/update only
   what changed, instead of a full rebuild every run.
+- **A filesystem watcher for the PDF folder** (e.g. via the `watchdog`
+  library) that detects new/changed/removed files and triggers ingestion
+  automatically, instead of requiring a manual `make ingest` after every
+  change. This only pays off once incremental ingestion (above) exists —
+  wiring a watcher to the *current* full-rebuild ingestion would mean every
+  dropped file re-embeds the entire corpus, which is worse than doing it
+  manually when you know the corpus changed. It would also need a debounce
+  window before triggering, since a bulk copy fires one filesystem event
+  per file and a naive watcher could start ingesting a PDF mid-write.
+  Deliberately not built for this exercise — the brief frames ingestion as
+  an operator-invoked CLI step ("run the ingestion command", "rebuild the
+  index if the PDF folder changes") — but it's a natural next step once
+  ingestion stops being a one-off task.
 - **A small evaluation set**: a handful of hand-labeled query → relevant
   chunk pairs, so changes to chunk size/overlap/model can be judged by a
   number instead of by eye.
 - **Better observability**: structured logs, and an endpoint to list what's
   currently indexed (`GET /documents`) for debugging what did or didn't
   make it into the index.
-- **A filesystem watcher for the PDF folder** (e.g. via the `watchdog`
-  library) that detects new/changed/removed files and automatically
-  (re)computes embeddings for just those files, instead of requiring a
-  manual `make ingest` after every change. Deliberately not built for this
-  exercise — the brief frames ingestion as an operator-invoked CLI step
-  ("run the ingestion command", "rebuild the index if the PDF folder
-  changes"), so an always-on watcher would be solving a problem this
-  exercise doesn't actually pose — but it's a natural, fairly small next
-  step once ingestion stops being a one-off task.
 
 ### Production readiness
 
@@ -377,15 +382,17 @@ so the suite runs in a few seconds without downloading any weights.
 - Move ingestion from a manually-invoked CLI to an event-driven
   pipeline/worker, with retries and per-document ingestion status tracking.
   Concretely: source PDFs directly from object storage (S3/GCS/Azure Blob)
-  instead of a pre-downloaded local folder, triggered either by bucket
-  event notifications or a scheduled poll, so a new document becomes
-  searchable without anyone manually downloading a folder and re-running a
-  CLI. This is the natural evolution of the filesystem-watcher idea above
-  once the corpus is something analysts continuously add to rather than a
-  fixed handful of files handed over once — but it's also directly the
-  opposite of this exercise's stated constraints (a local folder path
-  passed as a CLI argument, no managed cloud dependency), which is why it's
-  listed here rather than implemented.
+  instead of a pre-downloaded local folder, triggered by bucket event
+  notifications rather than a full-bucket poll (same reasoning as the
+  filesystem-watcher point above — an event per new/changed object, not a
+  rescan-everything trigger), so a new document becomes searchable without
+  anyone manually downloading a folder and re-running a CLI. This is the
+  natural evolution of that same idea once the corpus is something
+  analysts continuously add to rather than a fixed handful of files handed
+  over once. Deliberately not built here — the brief is explicit that
+  ingestion runs against PDFs "after they have been downloaded locally"
+  with the folder path as a CLI argument, so this would be solving a
+  problem outside this exercise's scope, not a missed requirement.
 - Add authentication/authorization, rate limiting, structured logging,
   metrics and tracing to the API.
 - Turn extraction-quality issues (scanned pages, empty documents, garbled
