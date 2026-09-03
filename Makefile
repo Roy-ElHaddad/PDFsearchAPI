@@ -6,6 +6,11 @@ IMAGE      ?= pdfsearch-api:latest
 PDF_DIR    ?= data/raw_pdfs
 INDEX_DIR  ?= data/index
 API_PORT   ?= 8000
+# Used only by `make test` (everything else runs inside Docker). Prefers
+# the project's own .venv if one exists, since that's where
+# requirements-dev.txt actually gets installed; falls back to python3
+# because plain `python` doesn't exist on a stock macOS/Linux PATH.
+PYTHON     := $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python3)
 
 help:
 	@echo "make build              build the Docker image"
@@ -15,7 +20,7 @@ help:
 	@echo "make down               stop the API server"
 	@echo "make restart            rebuild the index picked up by a running API (down + up)"
 	@echo "make logs               tail the API server logs"
-	@echo "make test               run the test suite locally (requires requirements-dev.txt)"
+	@echo "make test               run the test suite locally (needs .venv or python3 with requirements-dev.txt installed)"
 	@echo "make clean              delete the built index (forces a fresh ingest)"
 
 build:
@@ -51,7 +56,7 @@ logs:
 # requirements-dev.txt into the runtime image would only bloat it for no
 # benefit at request-serving time.
 test:
-	python -m pytest
+	$(PYTHON) -m pytest
 
 clean:
 	rm -f $(INDEX_DIR)/index.faiss $(INDEX_DIR)/metadata.json
