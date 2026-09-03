@@ -1,0 +1,25 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - model_cache:/root/.cache
+
+  # Run on demand: `docker compose run --rm ingest`
+  # Not part of `docker compose up` since it's a one-shot job, not a
+  # long-running service.
+  ingest:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - model_cache:/root/.cache
+    command: ["python", "-m", "app.ingest", "data/raw_pdfs"]
+    profiles: ["tools"]
+
+volumes:
+  # Caches downloaded embedding model weights across `ingest`/`api` runs
+  # so they aren't re-fetched from the internet every time a container
+  # starts.
+  model_cache:

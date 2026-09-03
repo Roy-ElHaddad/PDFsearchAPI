@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+data/raw_pdfs/*
+data/index/*
+!data/raw_pdfs/.gitkeep
+!data/index/.gitkeep
+tests
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.DS_Store
+README.md

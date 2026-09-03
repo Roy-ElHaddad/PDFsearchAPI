@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Generated index + metadata (built by ingestion, not source)
+data/index/*
+!data/index/.gitkeep
+
+# Raw input PDFs (user-provided, not part of the repo)
+data/raw_pdfs/*
+!data/raw_pdfs/.gitkeep
+
+# Downloaded model weights cache (if HF_HOME is pointed locally)
+.hf_cache/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
