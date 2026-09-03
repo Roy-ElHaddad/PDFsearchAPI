@@ -85,6 +85,19 @@ class VectorStore:
             )
 
         chunks = [Chunk.from_dict(d) for d in payload["chunks"]]
+
+        if index.ntotal != len(chunks):
+            # FAISS positions and chunk metadata are only meaningful
+            # together (position i in the index <-> chunks[i]) — if they
+            # ever drift apart, search() silently attributes a passage to
+            # the wrong document/page, or raises IndexError. Catching the
+            # mismatch here turns a hard-to-diagnose bad answer into a
+            # loud, actionable startup failure.
+            raise RuntimeError(
+                f"Corrupt index at {index_dir}: {index.ntotal} vectors but "
+                f"{len(chunks)} metadata chunks. Re-run ingestion."
+            )
+
         return cls(index, chunks)
 
     def search(self, query_vector: np.ndarray, top_k: int) -> list[tuple[Chunk, float]]:

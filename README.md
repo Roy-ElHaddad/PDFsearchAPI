@@ -79,6 +79,10 @@ ls data/index
 make up
 ```
 
+Runs detached (`docker compose up -d`), so the command returns immediately;
+`make logs` tails it from there. Port 8000 already taken? `make up
+API_PORT=9000` binds a different host port without touching the container.
+
 #### 6. Call `/search`
 
 ```bash

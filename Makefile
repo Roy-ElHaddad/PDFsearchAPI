@@ -16,10 +16,11 @@ help:
 	@echo "make build              build the Docker image"
 	@echo "make ingest             ingest PDFs from PDF_DIR (default: data/raw_pdfs) into INDEX_DIR"
 	@echo "make ingest PDF_DIR=... ingest PDFs from any local folder, not just data/raw_pdfs"
-	@echo "make up                 start the API server on API_PORT (default: 8000)"
+	@echo "make up                 start the API server, detached, on API_PORT (default: 8000)"
+	@echo "make up API_PORT=...    start it on a different host port"
 	@echo "make down               stop the API server"
-	@echo "make restart            rebuild the index picked up by a running API (down + up)"
-	@echo "make logs               tail the API server logs"
+	@echo "make restart            pick up a rebuilt index in a running API (down + up)"
+	@echo "make logs               tail the API server logs (use after 'make up')"
 	@echo "make test               run the test suite locally (needs .venv or python3 with requirements-dev.txt installed)"
 	@echo "make clean              delete the built index (forces a fresh ingest)"
 
@@ -41,7 +42,8 @@ ingest: build
 		$(IMAGE) python -m app.ingest /pdfs --output-dir data/index
 
 up: build
-	docker compose up api
+	API_PORT=$(API_PORT) docker compose up -d api
+	@echo "API running on http://localhost:$(API_PORT) - 'make logs' to tail, 'make down' to stop"
 
 down:
 	docker compose down

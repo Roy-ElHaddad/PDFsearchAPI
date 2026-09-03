@@ -9,7 +9,9 @@ services:
     build: .
     image: pdfsearch-api:latest
     ports:
-      - "8000:8000"
+      # ${API_PORT:-8000} lets `make up API_PORT=9000` actually take
+      # effect instead of always binding 8000 regardless of the flag.
+      - "${API_PORT:-8000}:8000"
     volumes:
       # The API only ever reads the built index, never the source PDFs.
       - ./data/index:/app/data/index

@@ -1,4 +1,7 @@
+import json
+
 import numpy as np
+import pytest
 
 from app.vector_store import VectorStore
 
@@ -41,3 +44,21 @@ def test_load_missing_index_raises_file_not_found(tmp_path):
         assert False, "expected FileNotFoundError"
     except FileNotFoundError as exc:
         assert "ingest" in str(exc)
+
+
+def test_load_rejects_index_metadata_count_mismatch(tmp_path, store):
+    # Simulates a torn write (e.g. metadata.json rewritten but index.faiss
+    # left stale) — position i in the FAISS index no longer lines up with
+    # chunks[i], which load() must refuse rather than serve mismatched
+    # results.
+    index_dir = tmp_path / "index"
+    store.save(index_dir)
+
+    metadata_path = index_dir / "metadata.json"
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload["chunks"].pop()
+    payload["chunk_count"] = len(payload["chunks"])
+    metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Corrupt index"):
+        VectorStore.load(index_dir)
