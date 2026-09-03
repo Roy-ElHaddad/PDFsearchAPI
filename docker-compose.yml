@@ -1,25 +1,25 @@
 services:
+  # Only the api service is long-running, so it's the only one modeled as
+  # a Compose service. Ingestion is a one-shot job whose input folder
+  # varies per invocation (see the Makefile's `ingest` target) — that
+  # doesn't fit Compose's static, pre-declared volume mounts well, so it
+  # runs via a plain `docker run` instead, mounting whatever folder the
+  # caller passes in.
   api:
     build: .
+    image: pdfsearch-api:latest
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      # The API only ever reads the built index, never the source PDFs.
+      - ./data/index:/app/data/index
       - model_cache:/root/.cache
-
-  # Run on demand: `docker compose run --rm ingest`
-  # Not part of `docker compose up` since it's a one-shot job, not a
-  # long-running service.
-  ingest:
-    build: .
-    volumes:
-      - ./data:/app/data
-      - model_cache:/root/.cache
-    command: ["python", "-m", "app.ingest", "data/raw_pdfs"]
-    profiles: ["tools"]
 
 volumes:
-  # Caches downloaded embedding model weights across `ingest`/`api` runs
-  # so they aren't re-fetched from the internet every time a container
-  # starts.
+  # Caches downloaded embedding model weights across ingest/api runs so
+  # they aren't re-fetched from the internet every time a container starts.
+  # Named explicitly (rather than left to Compose's project-prefixed
+  # default) so `make ingest`, which runs a plain `docker run` outside
+  # Compose, shares this exact volume instead of creating its own.
   model_cache:
+    name: pdfsearch_model_cache

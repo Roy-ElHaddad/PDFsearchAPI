@@ -16,7 +16,7 @@ from Hugging Face on first run.
 
 ## Contents
 
-- [Quickstart (Docker)](#quickstart-docker)
+- [Quickstart (Docker + Makefile)](#quickstart-docker--makefile)
 - [API reference](#api-reference)
 - [Running without Docker](#running-without-docker)
 - [Configuration](#configuration)
@@ -24,14 +24,18 @@ from Hugging Face on first run.
 - [Design decisions & trade-offs](#design-decisions--trade-offs)
 - [Solution review](#solution-review)
 
-## Quickstart (Docker)
+## Quickstart (Docker + Makefile)
 
 Requires Docker (and Docker Compose, bundled with modern Docker Desktop /
-`docker-compose-plugin`). Commands assume you're in the repo root.
+`docker-compose-plugin` — used by `make up`/`down`/`logs`). Commands assume
+you're in the repo root. Run `make help` at any point for the full target
+list.
 
 **1. Place PDFs locally**
 
-Download the PDFs from the shared folder and drop them into `data/raw_pdfs/`:
+Download the PDFs from the shared folder anywhere on your machine. The
+default is `data/raw_pdfs/`, but this is not a hardcoded requirement — see
+below.
 
 ```bash
 mkdir -p data/raw_pdfs
@@ -41,18 +45,26 @@ cp /path/to/downloaded/*.pdf data/raw_pdfs/
 **2. Build the image**
 
 ```bash
-docker compose build
+make build
 ```
 
 **3. Run ingestion**
 
 ```bash
-docker compose run --rm ingest
+make ingest
 ```
 
-This runs `python -m app.ingest data/raw_pdfs` inside the container. `data/`
-is a bind-mounted volume (see `docker-compose.yml`), so it reads the PDFs
-you just placed on the host and writes the index back to the host too.
+This builds the image if needed, then runs `python -m app.ingest <folder>`
+inside a container, mounting `data/raw_pdfs` (read-only) and `data/index`
+(read-write) so the CLI's own folder-path argument reads your PDFs from
+the host and the resulting index is written back to the host too.
+
+**PDFs somewhere other than `data/raw_pdfs`?** Point at any local folder
+directly — no need to copy files into the repo first:
+
+```bash
+make ingest PDF_DIR=/Users/you/Downloads/datapolitics_pdfs
+```
 
 **4. Verify the index was created**
 
@@ -64,7 +76,7 @@ ls data/index
 **5. Start the API server**
 
 ```bash
-docker compose up api
+make up
 ```
 
 **6. Call `/search`**
@@ -79,27 +91,25 @@ Or open `http://localhost:8000/docs` for interactive Swagger UI.
 
 **7. Rebuild the index if the PDF folder changes**
 
-Ingestion always does a full rebuild from whatever is currently in
-`data/raw_pdfs/` — add/remove/replace files there and re-run step 3:
+Ingestion always does a full rebuild from whatever `PDF_DIR` currently
+contains — add/remove/replace files there and re-run step 3:
 
 ```bash
-docker compose run --rm ingest
+make ingest
 ```
 
 The running API process won't pick up a rebuilt index automatically (it's
 loaded once into memory at startup); restart it:
 
 ```bash
-docker compose restart api
+make restart
 ```
 
-Without Compose, the equivalent plain Docker commands are:
-
-```bash
-docker build -t pdfsearch-api .
-docker run --rm -v "$(pwd)/data:/app/data" pdfsearch-api python -m app.ingest data/raw_pdfs
-docker run --rm -p 8000:8000 -v "$(pwd)/data:/app/data" pdfsearch-api
-```
+`make down` stops the server; `make logs` tails it while it's running;
+`make clean` deletes the built index if you want to confirm ingestion is
+required from a clean state. Every target is a thin wrapper around a single
+`docker build` / `docker run` / `docker compose` call — see `Makefile` for
+the exact underlying commands if you'd rather run them by hand.
 
 ## API reference
 
@@ -188,7 +198,7 @@ rather than silently serving nonsense similarity scores.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest
+make test   # or: python -m pytest
 ```
 
 Tests cover chunking logic, the FAISS store's save/load/search round-trip,
@@ -254,11 +264,17 @@ so the suite runs in a few seconds without downloading any weights.
   calling out since it's the kind of thing that's easy to miss until you
   actually build the image.
 
-- **Docker Compose is optional but included** for convenience: an `api`
-  service and a one-shot `ingest` service (via a `tools` profile, so it
-  doesn't start on `docker compose up`) sharing the `data/` bind mount, plus
-  a separate named volume caching downloaded model weights so repeated
-  `ingest`/`api` runs don't re-download ~470MB from Hugging Face each time.
+- **Makefile as the single entry point, Compose only for the long-running
+  service.** `make ingest` runs a plain `docker run` rather than a Compose
+  service, specifically so the PDF folder stays a real argument
+  (`PDF_DIR=...`) instead of a path baked into a static Compose volume
+  mount — the brief's "the local folder path must be provided as a
+  command-line argument" requirement is honored end-to-end, not just at
+  the `app.ingest` layer. `docker compose` is used only for `api`, since
+  that's the one genuinely long-running service where Compose's declarative
+  `up`/`down`/`logs` model is a real fit. Both paths share a named
+  `pdfsearch_model_cache` volume so the ~470MB of model weights are only
+  ever downloaded once, regardless of which target triggers it first.
 
 ## Solution review
 
@@ -342,6 +358,15 @@ so the suite runs in a few seconds without downloading any weights.
 - **Better observability**: structured logs, and an endpoint to list what's
   currently indexed (`GET /documents`) for debugging what did or didn't
   make it into the index.
+- **A filesystem watcher for the PDF folder** (e.g. via the `watchdog`
+  library) that detects new/changed/removed files and automatically
+  (re)computes embeddings for just those files, instead of requiring a
+  manual `make ingest` after every change. Deliberately not built for this
+  exercise — the brief frames ingestion as an operator-invoked CLI step
+  ("run the ingestion command", "rebuild the index if the PDF folder
+  changes"), so an always-on watcher would be solving a problem this
+  exercise doesn't actually pose — but it's a natural, fairly small next
+  step once ingestion stops being a one-off task.
 
 ### Production readiness
 
@@ -350,8 +375,17 @@ so the suite runs in a few seconds without downloading any weights.
   need for incremental upserts/durability outgrows a single process with
   an in-memory index rebuilt from scratch each time.
 - Move ingestion from a manually-invoked CLI to an event-driven
-  pipeline/worker (e.g. triggered by new files landing in object storage),
-  with retries and per-document ingestion status tracking.
+  pipeline/worker, with retries and per-document ingestion status tracking.
+  Concretely: source PDFs directly from object storage (S3/GCS/Azure Blob)
+  instead of a pre-downloaded local folder, triggered either by bucket
+  event notifications or a scheduled poll, so a new document becomes
+  searchable without anyone manually downloading a folder and re-running a
+  CLI. This is the natural evolution of the filesystem-watcher idea above
+  once the corpus is something analysts continuously add to rather than a
+  fixed handful of files handed over once — but it's also directly the
+  opposite of this exercise's stated constraints (a local folder path
+  passed as a CLI argument, no managed cloud dependency), which is why it's
+  listed here rather than implemented.
 - Add authentication/authorization, rate limiting, structured logging,
   metrics and tracing to the API.
 - Turn extraction-quality issues (scanned pages, empty documents, garbled
