@@ -24,8 +24,21 @@ class Settings(BaseSettings):
 
     # Word-count based chunking (see app/pdf_processing.py for why words
     # rather than characters or tokens).
-    chunk_size_words: int = 200
-    chunk_overlap_words: int = 40
+    #
+    # Sized against the embedding model's own limit, not chosen arbitrarily:
+    # paraphrase-multilingual-MiniLM-L12-v2 has max_seq_length=128 tokens,
+    # and SentenceTransformer.encode() silently truncates anything longer
+    # rather than erroring, so an oversized chunk doesn't fail - it just
+    # gets embedded from a truncated prefix without any signal that it
+    # happened. Measured with the model's own tokenizer against the real
+    # supplied corpus: at the previous default (200 words), 92% of chunks
+    # exceeded 128 tokens (mean 281). At 50 words, 99.6% fit fully within
+    # budget (mean ~81 tokens, comfortable headroom); going lower to chase
+    # the last <1% would shrink chunks past the point of being a
+    # "meaningful chunk" for a human reading the search result. Overlap
+    # kept at the same ~20% proportion as before.
+    chunk_size_words: int = 50
+    chunk_overlap_words: int = 10
 
     default_top_k: int = 5
     max_top_k: int = 50

@@ -158,7 +158,7 @@ Not required by the brief, but cheap and useful for confirming the server
 actually loaded an index before you start querying it:
 
 ```json
-{"status": "ok", "chunk_count": 145, "detail": null}
+{"status": "ok", "chunk_count": 542, "detail": null}
 ```
 
 ## Running without Docker
@@ -183,15 +183,17 @@ environment variable (or a `.env` file) of the same name:
 |---|---|---|
 | `INDEX_DIR` | `data/index` | Where the CLI writes / the API reads `index.faiss` + `metadata.json`. |
 | `EMBEDDING_MODEL_NAME` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Local CPU embedding model, shared by ingestion and the API. |
-| `CHUNK_SIZE_WORDS` | `200` | Target chunk size, in words. |
-| `CHUNK_OVERLAP_WORDS` | `40` | Overlap between consecutive chunks, in words. |
+| `CHUNK_SIZE_WORDS` | `50` | Target chunk size, in words - sized to the embedding model's 128-token limit, see below. |
+| `CHUNK_OVERLAP_WORDS` | `10` | Overlap between consecutive chunks, in words. |
 | `DEFAULT_TOP_K` | `5` | Default `top_k` when omitted from a search request. |
 | `MAX_TOP_K` | `50` | Upper bound on `top_k`, enforced by request validation. |
 
-Chunk size/overlap can also be overridden per ingestion run via CLI flags:
+Chunk size/overlap can also be overridden per ingestion run via CLI flags
+(going much above the 50-word default reintroduces the embedding-model
+truncation described above — see the chunking bullet in the next section):
 
 ```bash
-python -m app.ingest data/raw_pdfs --chunk-size 150 --chunk-overlap 30
+python -m app.ingest data/raw_pdfs --chunk-size 80 --chunk-overlap 15
 ```
 
 The API refuses to load an index that was built with a different embedding
@@ -218,14 +220,26 @@ so the suite runs in a few seconds without downloading any weights.
   brief explicitly deprioritizes extraction perfection, this felt like the
   right place to spend the least effort.
 
-- **Chunking — fixed word-count sliding window, per page.** Chunking is
-  done independently per page (not across the whole document) so that
-  `page_number` on every chunk is unambiguous — a chunk spanning two pages
-  would otherwise have to be assigned to one page arbitrarily. Word count
-  is a simple, dependency-free proxy for token count. Overlap (40 of 200
-  words by default) means a sentence that lands on a chunk boundary is
-  still fully readable in at least one chunk, at the cost of some
-  redundancy in the index.
+- **Chunking — fixed word-count sliding window, per page, sized to the
+  embedding model's context window.** Chunking is done independently per
+  page (not across the whole document) so that `page_number` on every
+  chunk is unambiguous — a chunk spanning two pages would otherwise have
+  to be assigned to one page arbitrarily. The chunk size itself (50 words,
+  10 overlap) isn't an arbitrary round number: `paraphrase-multilingual-
+  MiniLM-L12-v2` has a hard `max_seq_length` of 128 tokens, and
+  `SentenceTransformer.encode()` truncates anything longer *silently* —
+  no error, no warning at inference time, just a chunk embedded from a
+  truncated prefix. Measured with the model's own tokenizer against the
+  real supplied corpus: the original 200-word default put 92% of chunks
+  over that limit (mean 281 tokens — more than double budget); 50 words
+  gets 99.6% fully within it (mean ~81 tokens). Word count is still only a
+  proxy for token count (French runs ~1.7 tokens/word with this
+  tokenizer, with a long tail from numbers and legal citations), so a
+  residual <1% of chunks still overflow slightly — going smaller to chase
+  literal zero would shrink chunks past the point of being a "meaningful
+  chunk" a person can read as a passage, which is the actual requirement.
+  Overlap stays at the same ~20% proportion as before, so a sentence that
+  lands on a chunk boundary is still fully readable in at least one chunk.
 
 - **`chunk_index` is a running counter per document** (not reset per page),
   so results from the same document sort into a meaningful reading order
@@ -239,7 +253,7 @@ so the suite runs in a few seconds without downloading any weights.
 - **Vector store — FAISS `IndexFlatIP` over normalized vectors** (i.e.
   cosine similarity via brute-force inner product), not an approximate
   index like HNSW/IVF. At the scale this exercise targets (hundreds to low
-  thousands of chunks — the supplied corpus produced 145), brute-force
+  thousands of chunks — the supplied corpus produced 542), brute-force
   search is sub-millisecond and exact, and needs no training step or
   recall/speed tuning. FAISS has no notion of documents/pages/scores
   itself, so chunk metadata is kept as a parallel Python list persisted
@@ -314,10 +328,11 @@ so the suite runs in a few seconds without downloading any weights.
   identifiers, proper nouns. Dense embedding similarity is comparatively
   weak at this compared to keyword/lexical search — a hybrid approach
   would help here specifically.
-- **Very small corpora relative to `top_k`**: with 145 chunks total in the
-  supplied corpus, asking for `top_k=20` will return low-similarity
-  "least-bad" matches well past the point of actual relevance, since the
-  index doesn't discard nothing-like-this results — it just returns them.
+- **Small corpora relative to `top_k`**: with 542 chunks total in the
+  supplied corpus, asking for `top_k=50` (the API's max) will return
+  low-similarity "least-bad" matches well past the point of actual
+  relevance for a narrow query, since the index doesn't discard
+  nothing-like-this results — it just returns them.
 - **Domain-specific French administrative jargon/acronyms** not well
   represented in the multilingual model's training data, versus a
   French-specific or larger model.
