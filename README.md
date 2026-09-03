@@ -405,4 +405,6 @@ so the suite runs in a few seconds without downloading any weights.
 - Optionally add an LLM-based answer-synthesis layer on top of retrieved
   chunks with citations back to source passages — explicitly out of scope
   for this exercise, but the natural next step for the "research tool for
-  analysts" framing in the brief.
+  analysts" framing in the brief. To keep it consistent with the rest of
+  the solution (local, no paid APIs), this would run through a self-hosted
+  model via Ollama rather than a hosted LLM API.
